@@ -1,103 +1,247 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react'
+import { generateLLM, getExperiments } from '@/lib/api'
+import { useChatStore } from '@/store/useExperimentStore'
+import ParameterControls from '@/components/ParameterControls'
+import { Clock, Send, Settings } from 'lucide-react'
+import ExportButton from '@/components/ExportButton'
+import { motion } from 'framer-motion'
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [prompt, setPrompt] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [showParams, setShowParams] = useState(false)
+  const { experiments, setExperiments, addExperiment } = useChatStore()
+  const [messages, setMessages] = useState<any[]>([])
+  const [params, setParams] = useState({ temperature: 0.7, topP: 0.9 })
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  useEffect(() => {
+    getExperiments().then((res) => setExperiments(res.data))
+  }, [setExperiments])
+
+  // const handleGenerate = async () => {
+  //   if (!prompt.trim()) return
+  //   const userMsg = { role: 'user', content: prompt }
+  //   setMessages((prev) => [...prev, userMsg])
+  //   const currentPrompt = prompt
+  //   setPrompt('')
+
+  //   try {
+  //     setLoading(true)
+  //     const res = await generateLLM({ prompt: currentPrompt, ...params })
+  //     const aiMsg = { role: 'assistant', content: res.data.response }
+  //     setMessages((prev) => [...prev, aiMsg])
+  //     addExperiment(res.data)
+  //   } finally {
+  //     setLoading(false)
+  //   }
+  // }
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return
+
+    const userMsg = { role: 'user', content: prompt }
+    setMessages((prev) => [...prev, userMsg])
+    const currentPrompt = prompt
+    setPrompt('')
+    setLoading(true)
+
+    const aiMsg = { role: 'assistant', content: '' }
+    setMessages((prev) => [...prev, aiMsg])
+
+    try {
+      const res = await fetch('http://localhost:5000/llm/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: currentPrompt, ...params }),
+      })
+
+      if (!res.body) throw new Error('No stream received')
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value)
+        const match = chunk.match(/data: (.*)/g)
+        if (match) {
+          for (const line of match) {
+            const content = line.replace('data: ', '')
+            if (content === '[DONE]') continue
+            setMessages((prev) => {
+              const updated = [...prev]
+              const last = updated[updated.length - 1]
+              last.content += content
+              return updated
+            })
+          }
+        }
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
+
+  return (
+    <main className="relative w-full h-screen bg-gray-50 text-gray-900 overflow-hidden flex">
+      {/* Sidebar (History) */}
+      <aside
+        className={`fixed top-0 left-0 h-full w-72 bg-white border-r border-gray-200 p-4 flex flex-col z-40 transition-transform duration-300 ease-in-out transform ${showHistory ? 'translate-x-0' : '-translate-x-full'
+          }`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-gray-800">🧾 History</h2>
+          <button
+            onClick={() => setShowHistory(false)}
+            className="text-gray-400 hover:text-gray-600"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            ✖
+          </button>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+
+        <div className="flex-1 overflow-y-auto space-y-2">
+          {experiments.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center mt-4">No experiments yet</p>
+          ) : (
+            experiments.map((exp) => (
+              <div
+                key={exp.id}
+                onClick={() => {
+                  window.location.href = `/experiment/${exp.id}`
+                  setShowHistory(false)
+                }}
+                className="p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-indigo-50 cursor-pointer transition-all"
+              >
+                <p className="text-sm text-gray-800 font-medium truncate">
+                  {exp.prompt.slice(0, 50)}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Temp {exp.temperature} • TopP {exp.topP}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </aside>
+
+      {/* Overlay for mobile */}
+      {showHistory && (
+        <div
+          onClick={() => setShowHistory(false)}
+          className="fixed inset-0 bg-black/30 z-30 md:hidden"
+        ></div>
+      )}
+
+      {/* Main chat area */}
+      <section
+        className={`flex flex-col transition-all duration-300 ease-in-out ${showHistory ? 'md:ml-72' : 'ml-0'
+          } w-full`}
+      >
+        {/* Header */}
+        <header className="flex items-center justify-between bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
+          <h1 className="text-lg sm:text-xl font-bold text-gray-800">LLM Lab Console</h1>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowParams(!showParams)}
+              className="p-2 rounded-lg hover:bg-gray-100 transition"
+              title="Parameters"
+            >
+              <Settings size={18} className="text-gray-600" />
+            </button>
+            <ExportButton
+              data={experiments}
+              iconOnly
+              className="p-2 rounded-lg hover:bg-gray-100 transition"
+            />
+            <button
+              onClick={() => setShowHistory((prev) => !prev)}
+              className="p-2 rounded-lg hover:bg-gray-100 transition"
+              title="History"
+            >
+              <Clock size={18} className="text-gray-600" />
+            </button>
+          </div>
+        </header>
+
+        {/* Chat messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-gray-50">
+          {messages.length === 0 && !loading ? (
+            <div className="flex items-center justify-center h-full text-gray-400 text-center text-sm">
+              <p>👋 Enter a prompt below to start your first experiment.</p>
+            </div>
+          ) : (
+            <div className="space-y-4 pb-24">
+              {messages.map((msg, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                >
+                  <div
+                    className={`max-w-lg p-3 rounded-2xl shadow-sm text-sm ${msg.role === 'user'
+                      ? 'bg-indigo-500 text-white rounded-br-none'
+                      : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
+                      }`}
+                  >
+                    {msg.content}
+                  </div>
+                </motion.div>
+              ))}
+
+              {loading && messages[messages.length - 1]?.role === 'assistant' && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-200 text-gray-600 px-3 py-2 rounded-2xl text-sm shadow-sm animate-pulse">
+                    Thinking...
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+
+        {/* Input area fixed to bottom */}
+        <footer className="bg-white border-t border-gray-200 px-6 py-4 sticky bottom-0">
+          {showParams && (
+            <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <ParameterControls params={params} setParams={setParams} />
+            </div>
+          )}
+
+          <div className="flex gap-2 items-end">
+            <textarea
+              placeholder="Type your prompt..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) =>
+                e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleGenerate())
+              }
+              className="flex-1 resize-none h-14 p-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-indigo-400 outline-none bg-white text-gray-800"
+            />
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className={`p-5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md hover:opacity-90 transition ${loading ? 'opacity-70 cursor-not-allowed' : ''
+                }`}
+            >
+              {loading ? (
+                <div className="animate-spin border-2 border-white/50 border-t-transparent rounded-full w-5 h-5" />
+              ) : (
+                <Send size={18} />
+              )}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </main>
+  )
 }
