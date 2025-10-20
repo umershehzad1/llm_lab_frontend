@@ -1,5 +1,7 @@
 import axios from 'axios'
-const API = axios.create({ baseURL: 'http://localhost:5000/llm' })
+const API = axios.create({
+    baseURL: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/llm`,
+})
 
 export const generateLLM = (data: any) => API.post('/generate', data)
 export const getExperiments = () => API.get('/')
