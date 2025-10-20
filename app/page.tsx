@@ -1,43 +1,36 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { generateLLM, getExperiments } from '@/lib/api'
-import { useChatStore } from '@/store/useExperimentStore'
-import ParameterControls from '@/components/ParameterControls'
-import { Clock, Send, Settings } from 'lucide-react'
-import ExportButton from '@/components/ExportButton'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
+import { Clock, Send, Settings, ChevronDown, Sliders, SlidersHorizontal, SlidersIcon, ArrowUp } from 'lucide-react'
+import { getExperiments } from '@/lib/api'
+import ExportButton from '@/components/ExportButton'
+import { useChatStore } from '@/store/useExperimentStore'
 
 export default function Home() {
   const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showParams, setShowParams] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('gpt-4o-mini')
+  const [temperature, setTemperature] = useState(0.7)
+  const [topP, setTopP] = useState(0.9)
   const { experiments, setExperiments, addExperiment } = useChatStore()
   const [messages, setMessages] = useState<any[]>([])
-  const [params, setParams] = useState({ temperature: 0.7, topP: 0.9 })
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, loading])
+
 
   useEffect(() => {
     getExperiments().then((res) => setExperiments(res.data))
   }, [setExperiments])
-
-  // const handleGenerate = async () => {
-  //   if (!prompt.trim()) return
-  //   const userMsg = { role: 'user', content: prompt }
-  //   setMessages((prev) => [...prev, userMsg])
-  //   const currentPrompt = prompt
-  //   setPrompt('')
-
-  //   try {
-  //     setLoading(true)
-  //     const res = await generateLLM({ prompt: currentPrompt, ...params })
-  //     const aiMsg = { role: 'assistant', content: res.data.response }
-  //     setMessages((prev) => [...prev, aiMsg])
-  //     addExperiment(res.data)
-  //   } finally {
-  //     setLoading(false)
-  //   }
-  // }
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return
@@ -55,30 +48,74 @@ export default function Home() {
       const res = await fetch('http://localhost:5000/llm/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: currentPrompt, ...params }),
+        body: JSON.stringify({
+          prompt: currentPrompt,
+          temperature,
+          topP,
+          model: selectedModel,
+        }),
       })
 
       if (!res.body) throw new Error('No stream received')
-
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
+      let buffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const chunk = decoder.decode(value)
-        const match = chunk.match(/data: (.*)/g)
-        if (match) {
-          for (const line of match) {
-            const content = line.replace('data: ', '')
+
+        buffer += decoder.decode(value, { stream: true })
+        let lines = buffer.split('\n\n')
+
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('event: end')) continue
+          if (line.startsWith('data:')) {
+            const content = line.replace(/^data:\s*/, '')
             if (content === '[DONE]') continue
+            if (!content.trim()) continue
+
+            await new Promise((r) => setTimeout(r, 50))
+
             setMessages((prev) => {
               const updated = [...prev]
               const last = updated[updated.length - 1]
-              last.content += content
+
+              const newText = content
+              if (!last.content.endsWith(newText)) {
+                const separator =
+                  last.content.endsWith(' ') || newText.startsWith(' ') ? '' : ' '
+                last.content += separator + newText
+              }
+
               return updated
             })
+
           }
+        }
+      }
+
+      if (buffer.trim().startsWith('data:')) {
+        const content = buffer.replace(/^data:\s*/, '')
+        if (content && content !== '[DONE]') {
+          await new Promise((r) => setTimeout(r, 50))
+
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+
+            const newText = content
+            if (!last.content.endsWith(newText)) {
+              const separator =
+                last.content.endsWith(' ') || newText.startsWith(' ') ? '' : ' '
+              last.content += separator + newText
+            }
+
+            return updated
+          })
+
         }
       }
     } finally {
@@ -87,27 +124,21 @@ export default function Home() {
   }
 
 
-
   return (
-    <main className="relative w-full h-screen bg-gray-50 text-gray-900 overflow-hidden flex">
-      {/* Sidebar (History) */}
+    <main className="relative w-full h-screen bg-[#0f0f0f] text-gray-100 flex overflow-hidden">
       <aside
-        className={`fixed top-0 left-0 h-full w-72 bg-white border-r border-gray-200 p-4 flex flex-col z-40 transition-transform duration-300 ease-in-out transform ${showHistory ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed top-0 left-0 h-full w-72 bg-[#1a1a1a] border-r border-gray-800 p-4 flex flex-col z-40 transition-transform duration-300 transform ${showHistory ? 'translate-x-0' : '-translate-x-full'
           }`}
       >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-gray-800">🧾 History</h2>
-          <button
-            onClick={() => setShowHistory(false)}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            ✖
-          </button>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-200">Chatbot History</h2>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2">
+        <div className="flex-1 overflow-y-auto space-y-2 scrollbar-hide">
           {experiments.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center mt-4">No experiments yet</p>
+            <p className="text-sm text-gray-500 text-center mt-6">
+              No conversations yet
+            </p>
           ) : (
             experiments.map((exp) => (
               <div
@@ -116,10 +147,10 @@ export default function Home() {
                   window.location.href = `/experiment/${exp.id}`
                   setShowHistory(false)
                 }}
-                className="p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-indigo-50 cursor-pointer transition-all"
+                className="p-3 bg-[#222] rounded-lg hover:bg-[#2e2e2e] border border-gray-700 cursor-pointer transition-all"
               >
-                <p className="text-sm text-gray-800 font-medium truncate">
-                  {exp.prompt.slice(0, 50)}
+                <p className="text-sm text-gray-200 truncate">
+                  {exp.prompt.slice(0, 60)}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
                   Temp {exp.temperature} • TopP {exp.topP}
@@ -130,50 +161,115 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* Overlay for mobile */}
       {showHistory && (
         <div
           onClick={() => setShowHistory(false)}
-          className="fixed inset-0 bg-black/30 z-30 md:hidden"
+          className="fixed inset-0 bg-black/40 z-30 md:hidden"
         ></div>
       )}
 
-      {/* Main chat area */}
       <section
-        className={`flex flex-col transition-all duration-300 ease-in-out ${showHistory ? 'md:ml-72' : 'ml-0'
-          } w-full`}
+        className={`flex flex-col w-full transition-all duration-300 ${showHistory ? 'md:ml-72' : 'ml-0'
+          }`}
       >
-        {/* Header */}
-        <header className="flex items-center justify-between bg-white border-b border-gray-200 px-6 py-3 sticky top-0 z-10">
-          <h1 className="text-lg sm:text-xl font-bold text-gray-800">LLM Lab Console</h1>
+        <header className="flex items-center justify-between px-6 py-3 sticky top-0 z-10">
+          <button
+            onClick={() => setShowHistory((prev) => !prev)}
+            className="p-2 rounded-lg hover:bg-[#2a2a2a]"
+            title="History"
+          >
+            <SlidersHorizontal size={18} className="text-gray-400" />
+          </button>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowParams(!showParams)}
-              className="p-2 rounded-lg hover:bg-gray-100 transition"
+              className="p-2 gap-2 rounded-lg hover:bg-[#2a2a2a] row-gap-1 flex items-center"
               title="Parameters"
             >
-              <Settings size={18} className="text-gray-600" />
+              Change the params<Settings size={18} className="text-gray-400" />
             </button>
             <ExportButton
               data={experiments}
               iconOnly
-              className="p-2 rounded-lg hover:bg-gray-100 transition"
+              className="p-2 rounded-lg hover:bg-[#2a2a2a]"
             />
-            <button
-              onClick={() => setShowHistory((prev) => !prev)}
-              className="p-2 rounded-lg hover:bg-gray-100 transition"
-              title="History"
-            >
-              <Clock size={18} className="text-gray-600" />
-            </button>
           </div>
         </header>
 
+        {showParams && (
+          <>
+            <div
+              onClick={() => setShowParams(false)}
+              className="fixed inset-0 bg-black/40 z-40"
+            />
+
+            <div
+              className="fixed top-16 right-4 w-64 bg-[#1a1a1a] border border-gray-800 rounded-xl shadow-2xl p-4 
+    z-50 flex flex-col gap-4 animate-slide-in"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-300">Parameters</h3>
+              </div>
+
+              {/* Temperature */}
+              <div className="flex flex-col text-sm">
+                <label className="text-gray-400 mb-1">Temperature</label>
+                <select
+                  value={temperature}
+                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                  className="bg-[#2a2a2a] text-white rounded-lg border border-gray-700 focus:border-indigo-500
+                 px-3 py-2 appearance-none cursor-pointer pr-8"
+                  style={{
+                    backgroundImage:
+                      'url("data:image/svg+xml,%3Csvg fill=\'none\' stroke=\'%23aaa\' stroke-width=\'2\' viewBox=\'0 0 24 24\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' d=\'M19 9l-7 7-7-7\'/%3E%3C/svg%3E")',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 0.7rem center',
+                    backgroundSize: '1rem',
+                  }}
+                >
+                  {[0.1, 0.3, 0.5, 0.7, 0.9, 1].map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Top-P */}
+              <div className="flex flex-col text-sm">
+                <label className="text-gray-400 mb-1">Top-P</label>
+                <select
+                  value={topP}
+                  onChange={(e) => setTopP(parseFloat(e.target.value))}
+                  className="bg-[#2a2a2a] text-white rounded-lg border border-gray-700 focus:border-indigo-500
+                 px-3 py-2 appearance-none cursor-pointer pr-8"
+                  style={{
+                    backgroundImage:
+                      'url("data:image/svg+xml,%3Csvg fill=\'none\' stroke=\'%23aaa\' stroke-width=\'2\' viewBox=\'0 0 24 24\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' d=\'M19 9l-7 7-7-7\'/%3E%3C/svg%3E")',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 0.7rem center',
+                    backgroundSize: '1rem',
+                  }}
+                >
+                  {[0.1, 0.3, 0.5, 0.7, 0.9, 1].map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+          </>
+        )}
+
+
         {/* Chat messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-gray-50">
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 bg-[#0f0f0f]">
           {messages.length === 0 && !loading ? (
-            <div className="flex items-center justify-center h-full text-gray-400 text-center text-sm">
-              <p>👋 Enter a prompt below to start your first experiment.</p>
+            <div className="flex items-center justify-center h-full text-gray-500 text-3xl">
+              {/* Start a new conversation by typing a prompt below. */}
+              Welcome Back
             </div>
           ) : (
             <div className="space-y-4 pb-24">
@@ -187,9 +283,9 @@ export default function Home() {
                     }`}
                 >
                   <div
-                    className={`max-w-lg p-3 rounded-2xl shadow-sm text-sm ${msg.role === 'user'
-                      ? 'bg-indigo-500 text-white rounded-br-none'
-                      : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
+                    className={`max-w-2xl px-4 py-3 rounded-2xl text-sm whitespace-pre-line leading-relaxed ${msg.role === 'user'
+                      ? 'bg-indigo-600 text-white rounded-br-none'
+                      : 'bg-[#1a1a1a] border border-gray-700 text-gray-100 rounded-bl-none'
                       }`}
                   >
                     {msg.content}
@@ -197,46 +293,57 @@ export default function Home() {
                 </motion.div>
               ))}
 
-              {loading && messages[messages.length - 1]?.role === 'assistant' && (
+              {loading && (
                 <div className="flex justify-start">
-                  <div className="bg-gray-200 text-gray-600 px-3 py-2 rounded-2xl text-sm shadow-sm animate-pulse">
+                  <div className="bg-[#1a1a1a] border border-gray-700 text-gray-400 px-3 py-2 rounded-2xl text-sm animate-pulse">
                     Thinking...
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} />
 
             </div>
           )}
         </div>
 
-        {/* Input area fixed to bottom */}
-        <footer className="bg-white border-t border-gray-200 px-6 py-4 sticky bottom-0">
-          {showParams && (
-            <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200">
-              <ParameterControls params={params} setParams={setParams} />
-            </div>
-          )}
 
-          <div className="flex gap-2 items-end">
-            <textarea
-              placeholder="Type your prompt..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) =>
-                e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleGenerate())
-              }
-              className="flex-1 resize-none h-14 p-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-indigo-400 outline-none bg-white text-gray-800"
-            />
+        <footer className="px-4 py-3 sticky bottom-3">
+          <div className="flex items-center gap-2 max-w-4xl mx-auto">
+
+            <div className="flex-1 flex items-center gap-2 bg-[#2a2a2a] rounded-full px-4 py-2 border border-gray-700 focus-within:border-indigo-500">
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-[#2a2a2a] text-sm text-white border-none outline-none cursor-pointer pr-2"
+              >
+                <option value="gpt-4o-mini">GPT-4o-mini</option>
+                <option value="gpt-4.1">GPT-4.1</option>
+                <option value="gpt-3.5-turbo">GPT-3.5-Turbo</option>
+              </select>
+
+              <textarea
+                placeholder="Send a message..."
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleGenerate())
+                }
+                className="flex-1 bg-transparent resize-none border-none outline-none text-white placeholder-gray-400 py-1 text-sm leading-relaxed"
+                rows={1}
+                style={{ maxHeight: '100px' }}
+              />
+            </div>
+
             <button
               onClick={handleGenerate}
               disabled={loading}
-              className={`p-5 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md hover:opacity-90 transition ${loading ? 'opacity-70 cursor-not-allowed' : ''
-                }`}
+              className={`p-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-500 transition-colors flex items-center justify-center ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+              title="Send"
             >
               {loading ? (
                 <div className="animate-spin border-2 border-white/50 border-t-transparent rounded-full w-5 h-5" />
               ) : (
-                <Send size={18} />
+                <ArrowUp size={18} />
               )}
             </button>
           </div>
